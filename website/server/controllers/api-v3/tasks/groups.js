@@ -321,6 +321,51 @@ api.unassignTask = {
 };
 
 /**
+ * @api {get} /api/v3/tasks/:taskId/assigned-users Get assigned users detail for a group task
+ * @apiName GetTaskAssignedUsers
+ * @apiGroup Task
+ *
+ * @apiParam (Path) {UUID} taskId The id of the task
+ *
+ * @apiSuccess {Object} data An object containing `assignedUsersDetail` and `taskHistory`
+ */
+api.getTaskAssignedUsers = {
+  method: 'GET',
+  url: '/tasks/:taskId/assigned-users',
+  middlewares: [authWithHeaders()],
+  async handler (req, res) {
+    req.checkParams('taskId', apiError('taskIdRequired')).notEmpty().isUUID();
+
+    const reqValidationErrors = req.validationErrors();
+    if (reqValidationErrors) throw reqValidationErrors;
+
+    const { user } = res.locals;
+    const { taskId } = req.params;
+
+    const task = await Tasks.Task.findOne({ _id: taskId }).exec();
+    if (!task) throw new NotFound(res.t('messageTaskNotFound'));
+
+    if (!task.group || !task.group.id) {
+      throw new NotAuthorized(res.t('onlyGroupTasksCanBeAssigned'));
+    }
+
+    // Ensure the requesting user is subscribed to the group
+    const fields = requiredGroupFields.concat(' purchased managers');
+    const group = await Group.getGroup({ user, groupId: task.group.id, fields });
+    if (groupSubscriptionNotFound(group)) throw new NotFound(res.t('groupNotFound'));
+
+    // Prepare a minimal payload: assignedUsersDetail + task.history
+    const assignedUsersDetail = task.group.assignedUsersDetail || {};
+    const taskHistory = task.history || [];
+
+    res.respond(200, {
+      taskId: task._id,
+      assignedUsersDetail,
+      taskHistory,
+    });
+  },
+};
+/**
  * @api {post} /api/v3/tasks/:taskId/needs-work/:userId Require more work for a group task
  * @apiDescription Mark an assigned group task as needing more work before it can be approved
  * @apiVersion 3.0.0
